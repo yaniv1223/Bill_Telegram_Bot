@@ -1,13 +1,13 @@
-from expense_bot.config import settings
-from expense_bot.models import Base
 import asyncio
 from logging.config import fileConfig
 
+from alembic import context
 from sqlalchemy import pool
 from sqlalchemy.engine import Connection
 from sqlalchemy.ext.asyncio import async_engine_from_config
 
-from alembic import context
+from expense_bot.config import settings
+from expense_bot.models import Base
 
 config = context.config
 
