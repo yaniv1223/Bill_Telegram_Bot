@@ -11,10 +11,12 @@ from aiogram.types import (
 )
 
 from expense_bot.db import session_factory
-from expense_bot.parsers import parse_amount_text
+from expense_bot.parsers import split_name_and_amount
 from expense_bot.repositories import (
+    create_invite_code,
     find_category,
     get_or_create_account,
+    join_account,
     save_with_category,
 )
 
@@ -57,18 +59,17 @@ def confirmation_text(kind: str, name: str, price: Decimal) -> str:
 
 async def save_transaction(message: Message, text: str, kind: str) -> None:
     awaiting_custom.pop(message.from_user.id, None)
-    data = text.rsplit(maxsplit=1)
-    if len(data) < 2:
+    if len(text.split()) < 2:
         await message.answer("חסר שם או סכום, בדוק את ההודעה שוב\n")
         return
-    price = parse_amount_text(data[1])
-    if price is None:
+    result = split_name_and_amount(text)
+    if result is None:
         await message.answer("לא הצלחתי לקרוא את הסכום\n")
         return
+    name, price = result
     if not price.is_finite() or price <= 0:
         await message.answer("הסכום חייב להיות מספר גדול מאפס\n")
         return
-    name = data[0].strip()
 
     category = "הכנסה"
     if kind == "expense":
@@ -142,6 +143,28 @@ async def expense_text_handler(message: Message) -> None:
 @dp.message(F.text.startswith("הכנסה "))
 async def income_text_handler(message: Message) -> None:
     await save_transaction(message, message.text.removeprefix("הכנסה "), "income")
+
+
+@dp.message(F.text == "ליצור חשבון משותף")
+async def create_shared_account(message: Message) -> None:
+    code = await create_invite_code(message.from_user.id)
+    await message.answer(
+        f"החשבון המשותף מוכן! 🎉\nהקוד להצטרפות: {code}\n"
+        f"שלח אותו לבן/בת הזוג, והם יכתבו לבוט: להצטרף {code}"
+    )
+
+
+@dp.message(F.text.startswith("להצטרף"))
+async def join_shared_account(message: Message) -> None:
+    parts = message.text.split()
+    if len(parts) != 2:
+        await message.answer("צריך לכתוב: להצטרף ואז הקוד, למשל: להצטרף 4821")
+        return
+    joined = await join_account(message.from_user.id, parts[1])
+    if joined:
+        await message.answer("הצטרפת לחשבון המשותף ✅")
+    else:
+        await message.answer("הקוד לא נמצא. בדוק אותו ונסה שוב.")
 
 
 @dp.message(F.text)
