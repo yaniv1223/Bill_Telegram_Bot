@@ -1,10 +1,9 @@
 import asyncio
-from decimal import Decimal, InvalidOperation
+from decimal import Decimal
 
 from aiogram import Bot, Dispatcher, F
 from aiogram.filters import Command, CommandObject, CommandStart
 from aiogram.types import (
-    BotCommand,
     CallbackQuery,
     InlineKeyboardButton,
     InlineKeyboardMarkup,
@@ -16,6 +15,7 @@ from sqlalchemy import select
 from expense_bot.config import settings
 from expense_bot.db import session_factory
 from expense_bot.models import Account, CategoryRule, Transaction, User
+from expense_bot.parsers import parse_amount_text
 
 dp = Dispatcher()
 
@@ -23,6 +23,23 @@ pending: dict[tuple[int, int], tuple[str, Decimal, str]] = {}
 awaiting_custom: dict[int, tuple[str, Decimal, str]] = {}
 
 CATEGORIES = ["אוכל", "תחבורה", "קניות", "אחר"]
+
+WELCOME_TEXT = (
+    "היי! 👋 אני כאן כדי לעזור לך לדעת לאן הכסף הולך.\n"
+    "\n"
+    "אז איך זה עובד?\n"
+    "כשרוצים להוסיף מידע למערכת:\n"
+    "1) מתחילים במילה שמורה: הוצאה או הכנסה\n"
+    "2) כותבים את השם\n"
+    "3) כותבים את הסכום\n"
+    "\n"
+    "לדוגמה:\n"
+    "💸 הוצאה קפה 15\n"
+    "💰 הכנסה משכורת 8000\n"
+    "\n"
+    "אם מדובר בהוצאה, צריך גם לבחור קטגוריה.\n"
+    "שימו לב: בלחיצה על האפשרות אחר, תוכלו להכניס קטגוריה באופן ידני."
+)
 
 
 def category_keyboard() -> InlineKeyboardMarkup:
@@ -76,6 +93,20 @@ async def save_with_category(
 ) -> None:
     async with session_factory() as session:
         account = await get_or_create_account(session, telegram_id)
+        if remember:
+            result = await session.scalars(
+                select(CategoryRule).where(
+                    CategoryRule.user_id == account.user_id,
+                    CategoryRule.word == name,
+                )
+            )
+            rule = result.first()
+            if rule is None:
+                session.add(
+                    CategoryRule(user_id=account.user_id, word=name, category=category)
+                )
+            else:
+                category = rule.category
         session.add(
             Transaction(
                 account_id=account.id,
@@ -85,12 +116,6 @@ async def save_with_category(
                 note=name,
             )
         )
-        if remember:
-            existing = await find_category(session, account.user_id, name)
-            if existing is None:
-                session.add(
-                    CategoryRule(user_id=account.user_id, word=name, category=category)
-                )
         await session.commit()
 
 
@@ -100,9 +125,8 @@ async def save_transaction(message: Message, text: str, kind: str) -> None:
     if len(data) < 2:
         await message.answer("חסר שם או סכום, בדוק את ההודעה שוב\n")
         return
-    try:
-        price = Decimal(data[1])
-    except InvalidOperation:
+    price = parse_amount_text(data[1])
+    if price is None:
         await message.answer("לא הצלחתי לקרוא את הסכום\n")
         return
     if not price.is_finite() or price <= 0:
@@ -153,11 +177,9 @@ async def category_chosen(callback: CallbackQuery) -> None:
 
 
 @dp.message(CommandStart())
+@dp.message(Command("help"))
 async def handle_start(message: Message) -> None:
-    await message.answer(
-        "ברוך הבא לבוט של ניהול חשבונות",
-        reply_markup=ReplyKeyboardRemove(),
-    )
+    await message.answer(WELCOME_TEXT, reply_markup=ReplyKeyboardRemove())
 
 
 @dp.message(Command("add"))
@@ -205,15 +227,7 @@ async def custom_category_handler(message: Message) -> None:
 
 async def main() -> None:
     bot = Bot(token=settings.bot_token)
-    await bot.set_my_commands(
-        [
-            BotCommand(command="start", description="התחלה"),
-            BotCommand(command="add", description="הוספת הוצאה: /add קפה 15"),
-            BotCommand(
-                command="income", description="הוספת הכנסה: /income משכורת 8000"
-            ),
-        ]
-    )
+    await bot.delete_my_commands()
     await dp.start_polling(bot)
 
 
