@@ -155,3 +155,36 @@ async def month_summary(
             income_total += total
     by_category.sort(key=lambda row: row[1], reverse=True)
     return expense_total, income_total, by_category
+
+
+async def recent_transactions(
+    telegram_id: int, limit: int = 10
+) -> list[tuple[int, str | None, Decimal, str]]:
+    async with session_factory() as session:
+        account = await get_or_create_account(session, telegram_id)
+        account_id = account.id
+        await session.commit()
+        result = await session.execute(
+            select(
+                Transaction.id,
+                Transaction.note,
+                Transaction.amount,
+                Transaction.kind,
+            )
+            .where(Transaction.account_id == account_id)
+            .order_by(Transaction.created_at.desc(), Transaction.id.desc())
+            .limit(limit)
+        )
+        return [tuple(row) for row in result.all()]
+
+
+async def delete_transaction(telegram_id: int, transaction_id: int) -> bool:
+    async with session_factory() as session:
+        account = await get_or_create_account(session, telegram_id)
+        transaction = await session.get(Transaction, transaction_id)
+        if transaction is None or transaction.account_id != account.id:
+            await session.commit()
+            return False
+        await session.delete(transaction)
+        await session.commit()
+        return True

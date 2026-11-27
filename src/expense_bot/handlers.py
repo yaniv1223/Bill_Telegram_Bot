@@ -14,10 +14,12 @@ from expense_bot.db import session_factory
 from expense_bot.parsers import split_name_and_amount
 from expense_bot.repositories import (
     create_invite_code,
+    delete_transaction,
     find_category,
     get_or_create_account,
     join_account,
     month_summary,
+    recent_transactions,
     save_with_category,
 )
 
@@ -181,6 +183,62 @@ async def summary_handler(message: Message) -> None:
         lines.append("לפי קטגוריה:")
         lines.extend(f"{category}: {total:,.2f}" for category, total in by_category)
     await message.answer("\n".join(lines))
+
+
+def recent_keyboard(
+    rows: list[tuple[int, str | None, Decimal, str]],
+) -> InlineKeyboardMarkup:
+    buttons = []
+    for transaction_id, note, amount, kind in rows:
+        sign = "-" if kind == "expense" else "+"
+        buttons.append(
+            [
+                InlineKeyboardButton(
+                    text=f"🗑 {note or ''} {sign}{amount:,.2f}",
+                    callback_data=f"del:{transaction_id}",
+                )
+            ]
+        )
+    return InlineKeyboardMarkup(inline_keyboard=buttons)
+
+
+@dp.message(F.text == "אחרונות")
+async def recent_handler(message: Message) -> None:
+    rows = await recent_transactions(message.from_user.id)
+    if not rows:
+        await message.answer("אין עדיין תנועות")
+        return
+    await message.answer(
+        "התנועות האחרונות (לחיצה מוחקת):", reply_markup=recent_keyboard(rows)
+    )
+
+
+@dp.callback_query(F.data.startswith("del:"))
+async def delete_chosen(callback: CallbackQuery) -> None:
+    if callback.message is None or callback.data is None:
+        await callback.answer()
+        return
+    transaction_id = int(callback.data.removeprefix("del:"))
+    deleted = await delete_transaction(callback.from_user.id, transaction_id)
+    if not deleted:
+        await callback.answer("התנועה לא נמצאה", show_alert=True)
+        return
+    rows = await recent_transactions(callback.from_user.id)
+    if rows:
+        await callback.message.edit_reply_markup(reply_markup=recent_keyboard(rows))
+    else:
+        await callback.message.edit_text("אין עדיין תנועות")
+    await callback.answer("נמחק")
+
+
+@dp.message(F.text == "טעות")
+async def undo_last_handler(message: Message) -> None:
+    rows = await recent_transactions(message.from_user.id, limit=1)
+    if not rows:
+        await message.answer("אין מה למחוק")
+        return
+    await delete_transaction(message.from_user.id, rows[0][0])
+    await message.answer("תכניס בבקשה שוב את ההוצאה האחרונה")
 
 
 @dp.message(F.text)
