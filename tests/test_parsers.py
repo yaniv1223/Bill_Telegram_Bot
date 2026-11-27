@@ -14,7 +14,7 @@ def test_comma_remove():
 
 
 def test_invalid_returns_none():
-    assert parse_amount_text("dmfoidmf") is None
+    assert parse_amount_text("abc") is None
 
 
 @pytest.mark.parametrize(

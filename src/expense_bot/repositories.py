@@ -1,7 +1,8 @@
 import secrets
+from datetime import UTC, datetime
 from decimal import Decimal
 
-from sqlalchemy import select
+from sqlalchemy import func, select
 
 from expense_bot.db import session_factory
 from expense_bot.models import Account, AccountMember, CategoryRule, Transaction, User
@@ -46,7 +47,7 @@ async def create_invite_code(telegram_id: int) -> str:
     async with session_factory() as session:
         account = await get_or_create_account(session, telegram_id)
         if account.invite_code is None:
-            account.invite_code = f"{secrets.randbelow(10000):04d}"
+            account.invite_code = secrets.token_hex(4)
         code = account.invite_code
         await session.commit()
         return code
@@ -119,3 +120,38 @@ async def save_with_category(
             )
         )
         await session.commit()
+
+
+async def month_summary(
+    telegram_id: int,
+) -> tuple[Decimal, Decimal, list[tuple[str, Decimal]]]:
+    start = datetime.now(UTC).replace(day=1, hour=0, minute=0, second=0, microsecond=0)
+    async with session_factory() as session:
+        account = await get_or_create_account(session, telegram_id)
+        account_id = account.id
+        await session.commit()
+        result = await session.execute(
+            select(
+                Transaction.kind,
+                Transaction.category,
+                func.sum(Transaction.amount),
+            )
+            .where(
+                Transaction.account_id == account_id,
+                Transaction.created_at >= start,
+            )
+            .group_by(Transaction.kind, Transaction.category)
+        )
+        rows = result.all()
+
+    expense_total = Decimal(0)
+    income_total = Decimal(0)
+    by_category = []
+    for kind, category, total in rows:
+        if kind == "expense":
+            expense_total += total
+            by_category.append((category, total))
+        else:
+            income_total += total
+    by_category.sort(key=lambda row: row[1], reverse=True)
+    return expense_total, income_total, by_category

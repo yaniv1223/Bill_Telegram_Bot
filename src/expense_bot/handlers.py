@@ -17,6 +17,7 @@ from expense_bot.repositories import (
     find_category,
     get_or_create_account,
     join_account,
+    month_summary,
     save_with_category,
 )
 
@@ -165,6 +166,21 @@ async def join_shared_account(message: Message) -> None:
         await message.answer("הצטרפת לחשבון המשותף ✅")
     else:
         await message.answer("הקוד לא נמצא. בדוק אותו ונסה שוב.")
+
+
+@dp.message(F.text == "סיכום")
+async def summary_handler(message: Message) -> None:
+    expenses, income, by_category = await month_summary(message.from_user.id)
+    lines = [
+        "סיכום החודש:",
+        f"הוצאות: {expenses:,.2f}",
+        f"הכנסות: {income:,.2f}",
+    ]
+    if by_category:
+        lines.append("")
+        lines.append("לפי קטגוריה:")
+        lines.extend(f"{category}: {total:,.2f}" for category, total in by_category)
+    await message.answer("\n".join(lines))
 
 
 @dp.message(F.text)
