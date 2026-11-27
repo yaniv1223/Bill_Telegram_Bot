@@ -34,6 +34,7 @@ class Account(Base):
     user_id: Mapped[int] = mapped_column(ForeignKey("users.id"))
     name: Mapped[str] = mapped_column(String(50))
     currency: Mapped[str] = mapped_column(String(3), default="ILS")
+    invite_code: Mapped[str | None] = mapped_column(String(20))
 
 
 class Transaction(Base):
@@ -57,3 +58,11 @@ class CategoryRule(Base):
     user_id: Mapped[int] = mapped_column(ForeignKey("users.id"))
     word: Mapped[str] = mapped_column(String(50))
     category: Mapped[str] = mapped_column(String(50))
+
+
+class AccountMember(Base):
+    __tablename__ = "account_members"
+    __table_args__ = (UniqueConstraint("account_id", "user_id"),)
+    id: Mapped[int] = mapped_column(primary_key=True)
+    user_id: Mapped[int] = mapped_column(ForeignKey("users.id"))
+    account_id: Mapped[int] = mapped_column(ForeignKey("accounts.id"))
